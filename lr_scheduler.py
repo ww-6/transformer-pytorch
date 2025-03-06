@@ -22,8 +22,8 @@ class CustomScheduler(LRScheduler):
     def get_lr(self) -> list[float]:
 
         lr = self.d_model**-0.5 * min(
-            self._step_count**-0.5, 
-            self._step_count * self.warmup_steps**-1.5
+            (self._step_count + 1)**-0.5, 
+            (self._step_count + 1) * self.warmup_steps**-1.5
         )
 
         return [lr] * len(self.optimizer.param_groups)
