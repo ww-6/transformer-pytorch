@@ -42,17 +42,32 @@ def get_sentences(batch: dict[str, list], language='en') -> list[str]:
     return [x[language] for x in batch['translation']]
 
 
+def prepare_translation(batch: dict[str, list]) -> dict[str, list]:
+    '''Prepare a batch of sentences for translation.
 
-def get_token_ids(batch) -> list[list[int]]:
-    '''Get token ids from the output of Tokenizer.encode_batch()'''
-    return [x.ids for x in batch]
+    Args:
+        batch: Should be in the following form
+            {'id': [int, ...], 'translation': [{'language1': str, 'language2': str}, ...]}
 
+    Returns:
+        A dictionary containing:
+            - A list of source language sentences.
+            - A list of target language sentences.
+    '''
 
+    lan1_sentences = []
+    lan2_sentences = []
 
-def get_padding_masks(batch) -> list[list[int]]:
-    '''Get padding masks from the output of Tokenizer.encode_batch()'''
-    return [x.attention_mask for x in batch]
+    language1, language2 = batch['translation'][0].keys()
 
+    for item in batch['translation']:
+        lan1_sentences.append(item[language1])
+        lan2_sentences.append(item[language2])
+
+    return {
+        language1: lan1_sentences,
+        language2: lan2_sentences,
+    }
 
 
 def tokenize(
@@ -61,10 +76,10 @@ def tokenize(
     post_processor=None, 
     device=None
 ) -> tuple[Tensor, Tensor]:
-    '''Tokenize the batch and perform optional post processing.
+    '''Tokenize a list of sentences and perform optional post processing.
 
     Args:
-        batch: A list of sentences.
+        sentences: A list of sentences.
         tokenizer: An instance of tokenizers.Tokenizer.
         post_processor: An optional post processor from tokenizers.processors.
         device: Which device the output tensors should be moved to.
@@ -83,11 +98,15 @@ def tokenize(
         tokenizer.post_processor = post_processor
 
     sentences = tokenizer.encode_batch(sentences)
-    token_ids = get_token_ids(sentences)
-    padding_masks = get_padding_masks(sentences)
 
-    token_ids = torch.tensor(token_ids, device=device)
-    padding_masks = torch.tensor(padding_masks, device=device)
+    token_ids = []
+    padding_masks = []
+    for sentence in sentences:
+        token_ids.append(sentence.ids)
+        padding_masks.append(sentence.attention_mask)
+
+    token_ids = torch.tensor(token_ids, dtype=torch.long, device=device)
+    padding_masks = torch.tensor(padding_masks, dtype=torch.bool, device=device)
 
     return token_ids, padding_masks
 
@@ -168,8 +187,9 @@ def tokenize_target(sentences: list[str], tokenizer: Tokenizer, device=None) -> 
     )
 
     token_ids, padding_masks = tokenize(sentences, tokenizer, post_processor, device)
+    padding_masks = padding_masks[:, :-1]
 
-    return token_ids, padding_masks[:, 1:]
+    return token_ids, padding_masks
 
 
 
@@ -211,8 +231,9 @@ def process_batch(
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    source_sentences = get_sentences(batch, MyDatasets.source_language)
-    target_sentences = get_sentences(batch, MyDatasets.target_language)
+    batch = prepare_translation(batch)
+    source_sentences = batch[MyDatasets.source_language]
+    target_sentences = batch[MyDatasets.target_language]
 
     source_token_ids, source_padding_masks = tokenize_source(
         source_sentences, tokenizer, device
