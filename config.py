@@ -8,9 +8,9 @@ class TokenizerConfig:
     pad_token: str = '<PAD>'
     start_token: str = '<BOS>'
     end_token: str = '<EOS>'
-    batch_size: int = 100
+    batch_size: int = 64
     filename: str = 'tokenizer.json'
-    vocab_size: int = 37000
+    vocab_size: int = 36992
 
     @staticmethod
     def load_tokenizer() -> Tokenizer:
@@ -20,8 +20,8 @@ class TokenizerConfig:
 
 @dataclass
 class ModelConfig:
-    vocab_size: int
-    padding_idx: int
+    vocab_size: int = TokenizerConfig.vocab_size
+    padding_idx: int = 0
     max_seq_len: int = 256
     n_encoder_layers: int = 6
     n_decoder_layers: int = 6
@@ -47,16 +47,18 @@ class TrainConfig:
     checkpoint_file: str = 'checkpoints/best_model.pt'
     device: str = 'cuda'
     max_steps: int = 100_000
-    batch_size: int = 32
+    batch_size: int = 8
+    grad_accum_steps: int = 16
     label_smoothing: float = 0.1
-    eval_interval: int = 1000
-    log_interval: int = 1000
+    eval_interval: int = 200
+    log_interval: int = 50
     save_interval: int = 0
-    save_every_epoch: bool = False
-    early_stopping: bool = True
-    early_stop_thresh: int = 10_000
-    buffer_size: int = 10_000
-    seed: int = 123
+    save_every_epoch: bool = True
+    early_stopping: bool = False
+    early_stop_thresh: int = 1000
+    clip_grad_norm: float = 1.0
+    buffer_size: int = 1_000_000
+    seed: int = 1
 
 
 @dataclass
