@@ -3,30 +3,27 @@ import torch.nn as nn
 from torch.nn import functional as F
 from typing import Optional
 from torch import Tensor
+import math
 
 
 class PositionalEncoding(nn.Module):
     def __init__(self, max_seq_len: int, embd_dim: int) -> None:
         super().__init__()
-        self.max_seq_len = max_seq_len
-        self.embd_dim = embd_dim
-        pe = torch.zeros(max_seq_len, embd_dim)
-
-        position = torch.arange(0, max_seq_len).unsqueeze(1)
-        power = torch.arange(0, embd_dim, 2) / embd_dim
-        pe[:, 0::2] = torch.sin(position / (10000**power))
-        pe[:, 1::2] = torch.cos(position / (10000**power))
-        pe = pe.unsqueeze(0)
-
+        pe = torch.zeros(max_seq_len, embd_dim, dtype=torch.float)
+        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+        power = torch.arange(0, embd_dim, 2, dtype=torch.float) / embd_dim
+        div = 10000**-power
+        pe[:, 0::2] = torch.sin(position * div)
+        pe[:, 1::2] = torch.cos(position * div)
         self.register_buffer('pe', pe)
 
     def forward(self, x: Tensor, padding_masks: Optional[Tensor] = None) -> Tensor:
         B, T, E = x.shape
-        x = x + self.pe[:, :T, :]
+        output = x + self.pe[:T, :]
         if padding_masks is not None:
-            padding_masks = padding_masks.unsqueeze(-1)
-            x = x.masked_fill(padding_masks==0, 0)
-        return x
+            padding_masks_expanded = padding_masks.unsqueeze(-1).expand(B, T, E)
+            output = output.masked_fill(~padding_masks_expanded, 0.0)
+        return output
 
 
 class LayerNorm(nn.Module):
@@ -52,6 +49,7 @@ class MultiHeadAttention(nn.Module):
 
     def __init__(
         self,
+        max_seq_len: int = 512,
         d_model: int = 512,
         n_heads: int = 8,
         causal: bool = False,
@@ -72,6 +70,10 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(n_heads * self.value_dim, d_model, bias=False)
 
         self.causal = causal
+        mask = torch.ones((max_seq_len, max_seq_len), dtype=torch.bool)
+        if causal:
+            mask = torch.tril(mask)
+        self.register_buffer('mask', mask)
 
 
     def forward(
@@ -105,22 +107,22 @@ class MultiHeadAttention(nn.Module):
         k = k.transpose(1, 2)   # (B, H, T_k, key_dim)
         v = v.transpose(1, 2)   # (B, H, T_k, value_dim)
 
+        scale = 1.0 / math.sqrt(self.key_dim)
         # (B, H, T_q, key_dim) x (B, H, key_dim, T_k) -> (B, H, T_q, T_k)
-        attention = (q @ k.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.key_dim))
+        attention = (q @ k.transpose(-2, -1)) * scale 
 
-
-        mask = torch.ones((B, 1, T_q, T_k), dtype=int, device=self.W_q.weight.device)
-        if self.causal:
-            mask = torch.tril(mask)
-        if key_padding_masks is not None:
-            mask = mask * key_padding_masks.view(B, 1, 1, T_k)
-
-        attention = attention.masked_fill(mask == 0, float('-inf'))
+        if self.causal or key_padding_masks is not None:
+            mask = self.mask[:T_q, :T_k].expand(B, self.n_heads, T_q, T_k)
+            if key_padding_masks is not None:
+                key_padding_masks_expanded = key_padding_masks.view(B, 1, 1, T_k).expand(B, self.n_heads, T_q, T_k)
+                mask = mask & key_padding_masks_expanded
+            attention = attention.masked_fill(~mask, float('-inf'))
 
         attention = F.softmax(attention, dim=-1)
 
         if query_padding_masks is not None:
-            attention = attention * query_padding_masks.view(B, 1, T_q, 1)
+            query_padding_masks_expanded = query_padding_masks.view(B, 1, T_q, 1).expand(B, self.n_heads, T_q, T_k)
+            attention = attention.masked_fill(~query_padding_masks_expanded, 0.0)
 
         # (B, H, T_q, T_k) x (B, H, T_k, value_dim) -> (B, H, T_q, value_dim)
         attention = attention @ v
@@ -131,7 +133,7 @@ class MultiHeadAttention(nn.Module):
         #     2. Concatenate heads
         #        (B, T_q, H, value_dim) -> (B, T_q, H * value_dim)
 
-        attention = attention.transpose(1, 2).contiguous().view(B, T_q, self.n_heads * self.value_dim)
+        attention = attention.transpose(1, 2).reshape(B, T_q, self.n_heads * self.value_dim)
 
         # (B, T_q, H * value_dim) x (H * value_dim, d_model) -> (B, T_q, d_model)
         output = self.W_o(attention)
@@ -185,7 +187,8 @@ class ResidualBlock(nn.Module):
 class EncoderBlock(nn.Module):
     def __init__(
         self,
-        d_model: int,
+        max_seq_len: int = 512,
+        d_model: int = 512,
         n_heads: int = 8,
         feedforward_dim: int = 2048,
         dropout: float = 0.1,
@@ -195,6 +198,7 @@ class EncoderBlock(nn.Module):
         
         super().__init__()
         self.self_attention = MultiHeadAttention(
+            max_seq_len,
             d_model,
             n_heads,
             causal=False,
@@ -228,7 +232,8 @@ class EncoderBlock(nn.Module):
 class DecoderBlock(nn.Module):
     def __init__(
         self,
-        d_model: int,
+        max_seq_len: int = 512,
+        d_model: int = 512,
         n_heads: int = 8,
         feedforward_dim: int = 2048,
         dropout: float = 0.1,
@@ -238,12 +243,14 @@ class DecoderBlock(nn.Module):
         
         super().__init__()
         self.causal_self_attention = MultiHeadAttention(
+            max_seq_len,
             d_model,
             n_heads,
             causal=True,
         )
 
         self.cross_attention = MultiHeadAttention(
+            max_seq_len,
             d_model,
             n_heads,
             causal=False,

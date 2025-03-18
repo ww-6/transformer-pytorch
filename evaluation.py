@@ -41,4 +41,5 @@ for batch in test_data.iter(EvaluationConfig.batch_size):
 bleu_score = bleu.compute(predictions=predictions, references=references)
 sacrebleu_score = sacrebleu.compute(predictions=predictions, references=references)
 results = {'bleu': bleu_score['bleu'], 'sacrebleu': sacrebleu_score['score']}
+print(results)
 
