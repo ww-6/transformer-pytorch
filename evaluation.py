@@ -2,7 +2,7 @@ import torch
 import evaluate
 from transformer import Transformer
 from config import TokenizerConfig, EvaluationConfig, MyDatasets
-from utils import get_sentences, prepare_tokenizer
+from utils import prepare_tokenizer, prepare_translation
 
 
 test_data = MyDatasets.load_test()
@@ -22,23 +22,21 @@ predictions = []
 references = []
 
 
-
 for batch in test_data.iter(EvaluationConfig.batch_size):
-
-    source = get_sentences(batch, MyDatasets.source_language)
-    target = get_sentences(batch, MyDatasets.target_language)
+    batch = prepare_translation(batch)
+    source = batch[MyDatasets.source_language]
+    target = batch[MyDatasets.target_language]
 
     pred = model.translate(
-        source, 
-        tokenizer, 
+        source,
+        tokenizer,
         TokenizerConfig.start_token,
         TokenizerConfig.end_token,
-        EvaluationConfig.max_tokens
+        EvaluationConfig.max_tokens,
     )
-    
+
     predictions += pred
     references += [[sentence] for sentence in target]
-
 
 bleu_score = bleu.compute(predictions=predictions, references=references)
 sacrebleu_score = sacrebleu.compute(predictions=predictions, references=references)
