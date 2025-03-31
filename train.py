@@ -175,7 +175,7 @@ while not stop:
         total_loss += loss.item()
         loss.backward()
 
-    grad_norm = clip_grad_norm_(model.parameters(), TrainConfig.clip_grad_norm)
+    grad_norm = clip_grad_norm_(model.parameters(), TrainConfig.max_grad_norm)
     optimizer.step()
     optimizer.zero_grad()
     lr_scheduler.step()

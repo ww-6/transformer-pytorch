@@ -56,7 +56,7 @@ class TrainConfig:
     save_every_epoch: bool = True
     early_stopping: bool = False
     early_stop_thresh: int = 1000
-    clip_grad_norm: float = 1.0
+    max_grad_norm: float = 1.0
     buffer_size: int = 1_000_000
     seed: int = 1
 

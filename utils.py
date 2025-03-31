@@ -167,8 +167,7 @@ def tokenize_target(sentences: list[str], tokenizer: Tokenizer, device=None) -> 
         single=' '.join([
             TokenizerConfig.start_token, 
             '$A', 
-            TokenizerConfig.end_token, 
-            TokenizerConfig.pad_token
+            TokenizerConfig.end_token
         ]),
         special_tokens=[
             (
@@ -179,10 +178,6 @@ def tokenize_target(sentences: list[str], tokenizer: Tokenizer, device=None) -> 
                 TokenizerConfig.end_token,
                 tokenizer.token_to_id(TokenizerConfig.end_token),
             ),
-            (
-                TokenizerConfig.pad_token,
-                tokenizer.token_to_id(TokenizerConfig.pad_token)
-            )
         ],
     )
 
